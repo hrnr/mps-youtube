@@ -1,6 +1,23 @@
 mps-youtube
 ===========
 
+About this fork
+---------------
+This fork includes support for MPRIS2, which allows controlling mps-youtube over dbus. It will probably integrate to your enviroment smoothly, or you can use controllers like `playerctl <https://github.com/acrisci/playerctl>`_ to control mps-youtube remotely. It is implemented as wrapper over mps-youtube.
+
+additionall prerequisities
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+- python3
+- python3-dbus
+- python3-gi (for GLib main loop)
+- xterm (or modify script to use other terminal emulator)
+- xdotool
+
+running
+~~~~~~~
+- unless you are installing to `~/Python`, modify paths in `mpsyt-mpris.sh`
+- run `mpsyt-mpris.sh`
+
 .. image:: https://landscape.io/github/np1/mps-youtube/develop/landscape.svg
     :target: https://landscape.io/github/np1/mps-youtube/develop
     :alt: Code Health
