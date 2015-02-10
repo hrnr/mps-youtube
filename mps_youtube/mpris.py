@@ -154,6 +154,7 @@ class Mpris2MediaPlayer(dbus.service.Object):
                     'CanRaise' : False,
                     'HasTrackList' : False,
                     'Identity' : IDENTITY,
+                    'DesktopEntry' : 'mps-youtube',
                     'SupportedUriSchemes' : dbus.Array([], 's', 1),
                     'SupportedMimeTypes' : dbus.Array([], 's', 1),
                 },

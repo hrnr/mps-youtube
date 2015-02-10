@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=mps-youtube
+GenericName=Music Player
+Keywords=Audio;Song;Podcast;Playlist;youtube.com;
+Exec=mpsyt %U
+Terminal=true
+Type=Application
+Categories=AudioVideo;Audio;Player;
+StartupNotify=true
