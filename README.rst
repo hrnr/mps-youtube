@@ -3,7 +3,9 @@ mps-youtube
 
 About this fork
 ---------------
-This fork includes support for MPRIS2, which allows controlling mps-youtube over dbus. It will probably integrate to your enviroment smoothly, or you can use controllers like `playerctl <https://github.com/acrisci/playerctl>`_ to control mps-youtube remotely. It is implemented as wrapper over mps-youtube.
+~~This fork includes support for MPRIS2, which allows controlling mps-youtube over dbus. It will probably integrate to your enviroment smoothly, or you can use controllers like `playerctl <https://github.com/acrisci/playerctl>`_ to control mps-youtube remotely. It is implemented as wrapper over mps-youtube.~~
+
+This has been merged by upstream. This repo will serve to my experiments with mps-youtube.
 
 additionall prerequisities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
