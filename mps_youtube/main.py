@@ -5,7 +5,7 @@ mps-youtube.
 
 https://github.com/np1/mps-youtube
 
-Copyright (C) 2014 nagev
+Copyright (C) 2014, 2015 np1 and contributors
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -24,9 +24,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import print_function
 
-__version__ = "0.2.1"
-__notes__ = "dev version"
-__author__ = "nagev"
+__version__ = "0.2.3"
+__notes__ = "released 17 Feb 2015"
+__author__ = "np1"
 __license__ = "GPLv3"
 
 from xml.etree import ElementTree as ET
@@ -82,13 +82,13 @@ except ImportError:
 if sys.version_info[:2] >= (3, 0):
     # pylint: disable=E0611,F0401
     import pickle
-    from urllib.request import build_opener
+    from urllib.request import urlopen
     from urllib.error import HTTPError, URLError
     from urllib.parse import urlencode
     uni, byt, xinput = str, bytes, input
 
 else:
-    from urllib2 import build_opener, HTTPError, URLError
+    from urllib2 import urlopen, HTTPError, URLError
     import cPickle as pickle
     from urllib import urlencode
     uni, byt, xinput = unicode, str, raw_input
@@ -96,12 +96,12 @@ else:
 
 def utf8_encode(x):
     """ Encode Unicode. """
-    return x.encode("utf8") if type(x) == uni else x
+    return x.encode("utf8") if isinstance(x, uni) else x
 
 
 def utf8_decode(x):
     """ Decode Unicode. """
-    return x.decode("utf8") if type(x) == byt else x
+    return x.decode("utf8") if isinstance(x, byt) else x
 
 mswin = os.name == "nt"
 not_utf8_environment = mswin or "UTF-8" not in os.environ.get("LANG", "")
@@ -113,9 +113,10 @@ def member_var(x):
 
 
 locale.setlocale(locale.LC_ALL, "")  # for date formatting
+XYTuple = collections.namedtuple('XYTuple', 'width height max_results')
 
 
-def getxy(wh=None):
+def getxy():
     """ Get terminal size, terminal width and max-results. """
     if g.detectable_size:
         x, y = terminalsize.get_terminal_size()
@@ -126,8 +127,7 @@ def getxy(wh=None):
         x, max_results = Config.CONSOLE_WIDTH.get, Config.MAX_RESULTS.get
         y = max_results + 4
 
-    retval = dict(width=x, height=y, max_results=max_results)
-    return (x, y, max_results) if not wh else retval[wh]
+    return XYTuple(x, y, max_results)
 
 
 def utf8_replace(txt):
@@ -208,12 +208,8 @@ def get_config_dir():
         confdir = os.path.join(os.path.expanduser("~"), '.config')
 
     mps_confdir = os.path.join(confdir, "mps-youtube")
-    old_confdir = os.path.join(confdir, "pms-youtube")
 
-    if os.path.exists(old_confdir) and not os.path.exists(mps_confdir):
-        os.rename(old_confdir, mps_confdir)
-
-    elif not os.path.exists(mps_confdir):
+    if not os.path.exists(mps_confdir):
         os.makedirs(mps_confdir)
 
     return mps_confdir
@@ -248,12 +244,10 @@ def has_exefile(filename):
     for path in paths:
         exepath = os.path.join(path, filename)
 
-        if os.path.exists(exepath):
-            if os.path.isfile(exepath):
-
-                if os.access(exepath, os.X_OK):
-                    dbg("found at %s", exepath)
-                    return exepath
+        if os.path.isfile(exepath):
+            if os.access(exepath, os.X_OK):
+                dbg("found at %s", exepath)
+                return exepath
 
     return False
 
@@ -262,7 +256,7 @@ def get_content_length(url, preloading=False):
     """ Return content length of a url. """
     prefix = "preload: " if preloading else ""
     dbg(c.y + prefix + "getting content-length header" + c.w)
-    response = utf8_decode(g.urlopen(url))
+    response = utf8_decode(urlopen(url))
     headers = response.headers
     cl = headers['content-length']
     return int(cl)
@@ -389,7 +383,7 @@ def get_streams(vid, force=False, callback=None, threeD=False):
 def select_stream(slist, q=0, audio=False, m4a_ok=True, maxres=None):
     """ Select a stream from stream list. """
     maxres = maxres or Config.MAX_RES.get
-    slist = slist['meta'] if type(slist) == dict else slist
+    slist = slist['meta'] if isinstance(slist, dict) else slist
     au_streams = [x for x in slist if x['mtype'] == "audio"]
 
     def okres(x):
@@ -706,6 +700,7 @@ class Config(object):
     COLOURS = ConfigItem("colours",
                          False if mswin and not has_colorama else True,
                          check_fn=check_colours)
+    DOWNLOAD_COMMAND = ConfigItem("download_command", '')
 
 
 class Playlist(object):
@@ -721,7 +716,7 @@ class Playlist(object):
     @property
     def is_empty(self):
         """ Return True / False if songs are populated or not. """
-        return bool(not self.songs)
+        return not self.songs
 
     @property
     def size(self):
@@ -749,7 +744,6 @@ class g(object):
     command_line = False
     debug_mode = False
     preload_disabled = False
-    urlopen = None
     isatty = sys.stdout.isatty()
     ytpls = []
     mpv_version = 0, 0, 0
@@ -813,6 +807,7 @@ def get_version_info():
     out += ("\nPlatform       : %s" % platform.platform())
     out += ("\nsys.stdout.enc : %s" % sys.stdout.encoding)
     out += ("\ndefault enc    : %s" % sys.getdefaultencoding())
+    out += ("\nConfig dir     : %s" % get_config_dir())
     envs = "TERM SHELL LANG LANGUAGE".split()
 
     for env in envs:
@@ -853,16 +848,14 @@ def init():
 
     init_text()
     init_readline()
-    init_opener()
     init_cache()
     init_transcode()
 
     # set player to mpv or mplayer if found, otherwise unset
-    E = os.path.exists
     suffix = ".exe" if mswin else ""
     mplayer, mpv = "mplayer" + suffix, "mpv" + suffix
 
-    if not E(g.CFFILE):
+    if not os.path.exists(g.CFFILE):
 
         if has_exefile(mpv):
             Config.PLAYER = ConfigItem("player", mpv, check_fn=check_player)
@@ -1036,15 +1029,6 @@ def init_readline():
             dbg(c.g + "Read history file" + c.w)
 
 
-def init_opener():
-    """ Set up url opener. """
-    opener = build_opener()
-    ua = "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; "
-    ua += "Trident/5.0)"
-    opener.addheaders = [("User-Agent", ua)]
-    g.urlopen = opener.open
-
-
 def known_player_set():
     """ Return true if the set player is known. """
     for allowed_player in g.playerargs_defaults:
@@ -1062,7 +1046,7 @@ def known_player_set():
 
 def showconfig(_):
     """ Dump config data. """
-    width = getxy("width")
+    width = getxy().width
     width -= 30
     s = "  %s%-17s%s : %s\n"
     out = "  %s%-17s   %s%s%s\n" % (c.ul, "Key", "Value", " " * width, c.w)
@@ -1122,7 +1106,7 @@ def import_config():
                 dbg("Unrecognised config item: %s", k)
 
         # Update config files from versions <= 0.01.41
-        if type(Config.PLAYERARGS.get) == list:
+        if isinstance(Config.PLAYERARGS.get, list):
             Config.WINDOW_POS.value = "top-right"
             redundant = ("-really-quiet --really-quiet -prefer-ipv4 -nolirc "
                          "-fs --fs".split())
@@ -1229,7 +1213,7 @@ def init_text():
 
         "exitmsg": ("**0mps-youtube - **1http://github.com/np1/mps-youtube**0"
                     "\nReleased under the GPLv3 license\n"
-                    "(c) 2014 nagev**2\n"""),
+                    "(c) 2014, 2015 np1 and contributors**2\n"""),
         "_exitmsg": (c.r, c.b, c.w),
 
         # Error / Warning messages
@@ -1321,6 +1305,20 @@ def open_from_file():
         if not os.path.isfile(g.PLFILE):
             g.userpl = {}
             save_to_file()
+
+    except AttributeError:
+        # playlist is from a time when this module was __main__
+        # https://github.com/np1/mps-youtube/issues/214
+        import __main__
+        __main__.Playlist = Playlist
+        __main__.Video = Video
+
+        with open(g.PLFILE, "rb") as plf:
+            g.userpl = pickle.load(plf)
+
+        save_to_file()
+        xprint("Updated playlist file. Please restart mpsyt")
+        sys.exit()
 
     except EOFError:
         xprint("Error opening playlists from %s" % g.PLFILE)
@@ -1414,7 +1412,7 @@ def playlists_display():
             generate_songlist_display()
 
     maxname = max(len(a) for a in g.userpl)
-    out = "      {0}Saved Playlists{1}\n".format(c.ul, c.w)
+    out = "      {0}Local Playlists{1}\n".format(c.ul, c.w)
     start = "      "
     fmt = "%s%s%-3s %-" + uni(maxname + 3) + "s%s %s%-7s%s %-5s%s"
     head = (start, c.b, "ID", "Name", c.b, c.b, "Count", c.b, "Duration", c.w)
@@ -1443,7 +1441,7 @@ def mplayer_help(short=True):
         pause = "[{0}DN{1}] SEEK [{0}UP{1}]       [{0}space{1}] pause"
 
     single = "[{0}q{1}] return"
-    next_prev = "[{0}n{1}] next/prev [{0}p{1}]"
+    next_prev = "[{0}>{1}] next/prev [{0}<{1}]"
     # ret = "[{0}q{1}] %s" % ("return" if short else "next track")
     ret = single if short else next_prev
     fmt = "    %-20s       %-20s"
@@ -1530,7 +1528,7 @@ def playback_progress(idx, allsongs, repeat=False):
     """ Generate string to show selected tracks, indicate current track. """
     # pylint: disable=R0914
     # too many local variables
-    cw = getxy("width")
+    cw = getxy().width
     out = "  %s%-XXs%s%s\n".replace("XX", uni(cw - 9))
     out = out % (c.ul, "Title", "Time", c.w)
     show_key_help = (known_player_set and Config.SHOW_MPLAYER_KEYS.get)
@@ -1591,7 +1589,7 @@ def num_repr(num):
 
 def real_len(u, alt=False):
     """ Try to determine width of strings displayed with monospace font. """
-    if type(u) != uni:
+    if not isinstance(u, uni):
         u = u.decode("utf8")
 
     ueaw = unicodedata.east_asian_width
@@ -1655,7 +1653,7 @@ def generate_playlist_display():
         g.message = c.r + "No playlists found!"
         return logo(c.g) + "\n\n"
 
-    cw = getxy("width")
+    cw = getxy().width
     fmtrow = "%s%-5s %s %-8s  %-2s%s\n"
     fmthd = "%s%-5s %-{}s %-9s %-5s%s\n".format(cw - 23)
     head = (c.ul, "Item", "Playlist", "Updated", "Count", c.w)
@@ -1701,7 +1699,7 @@ def get_user_columns():
                 sz = int(namesize[1])
 
             total_size += sz
-            cw = getxy("width")
+            cw = getxy().width
             if total_size < cw - 18:
                 ret.append(dict(name=nm, size=sz, heading=hd))
 
@@ -1726,7 +1724,7 @@ def generate_songlist_display(song=False, zeromsg=None, frmat="search"):
     lengthsize = 8 if maxlength > 35999 else 7
     lengthsize = 5 if maxlength < 6000 else lengthsize
     reserved = 9 + lengthsize + len(user_columns)
-    cw = getxy("width")
+    cw = getxy().width
     cw -= 1
     title_size = cw - sum(1 + x['size'] for x in user_columns) - reserved
     before = [{"name": "idx", "size": 3, "heading": "Num"},
@@ -1968,18 +1966,56 @@ def playsong(song, failcount=0, override=False):
     return returncode
 
 
+def get_input_file():
+    """ Check for existence of custom input file.
+
+    Return file name of temp input file with mpsyt mappings included
+    """
+    confpath = conf = ''
+
+    if "mpv" in Config.PLAYER.get:
+        confpath = os.path.join(get_config_dir(), "mpv-input.conf")
+
+    elif "mplayer" in Config.PLAYER.get:
+        confpath = os.path.join(get_config_dir(), "mplayer-input.conf")
+
+    if os.path.isfile(confpath):
+        dbg("using %s for input key file", confpath)
+
+        with open(confpath) as conffile:
+            conf = conffile.read() + '\n'
+
+    conf = conf.replace("quit", "quit 43")
+    conf = conf.replace("playlist_prev", "quit 42")
+    conf = conf.replace("pt_step -1", "quit 42")
+    conf = conf.replace("playlist_next", "quit")
+    conf = conf.replace("pt_step 1", "quit")
+    standard_cmds = ['q quit 43\n', '> quit\n', '< quit 42\n', 'NEXT quit\n',
+                     'PREV quit 42\n', 'ENTER quit\n']
+    bound_keys = [i.split()[0] for i in conf.splitlines() if i.split()]
+
+    for i in standard_cmds:
+        key = i.split()[0]
+
+        if key not in bound_keys:
+            conf += i
+
+    with tempfile.NamedTemporaryFile('w', prefix='mpsyt-input',
+                                     delete=False) as tmpfile:
+        tmpfile.write(conf)
+        return tmpfile.name
+
+
 def launch_player(song, songdata, cmd):
     """ Launch player application. """
     # fix for github issue 59
     if known_player_set() and mswin and sys.version_info[:2] < (3, 0):
         cmd = [x.encode("utf8", errors="replace") for x in cmd]
 
-    try:
-        with tempfile.NamedTemporaryFile('w', prefix='mpsyt-input',
-                                         delete=False) as tmpfile:
-            tmpfile.write('k quit 42\nj quit\nq quit 43\np quit 42\nn quit\n')
-            input_file = tmpfile.name
+    input_file = get_input_file()
+    sockpath = None
 
+    try:
         if "mplayer" in Config.PLAYER.get:
             cmd.append('-input')
 
@@ -1996,7 +2032,6 @@ def launch_player(song, songdata, cmd):
 
         elif "mpv" in Config.PLAYER.get:
             cmd.append('--input-conf=' + input_file)
-            sockpath = None
 
             if g.mpv_usesock:
                 sockpath = tempfile.mktemp('.sock', 'mpsyt-mpv')
@@ -2016,6 +2051,7 @@ def launch_player(song, songdata, cmd):
         else:
             with open(os.devnull, "w") as devnull:
                 returncode = subprocess.call(cmd, stderr=devnull)
+            p = None
 
         return returncode
 
@@ -2024,16 +2060,13 @@ def launch_player(song, songdata, cmd):
         return None
 
     finally:
-        try:
-            os.unlink(input_file)
+        os.unlink(input_file)
 
-            if sockpath:
-                os.unlink(sockpath)
+        if sockpath:
+            os.unlink(sockpath)
 
+        if p and p.poll() is None:
             p.terminate()  # make sure to kill mplayer if mpsyt crashes
-
-        except (OSError, AttributeError, UnboundLocalError):
-            pass
 
 
 def player_status(po_obj, prefix, songlength=0, mpv=False, sockpath=None):
@@ -2048,28 +2081,38 @@ def player_status(po_obj, prefix, songlength=0, mpv=False, sockpath=None):
     volume_level = None
 
     if sockpath:
-        time.sleep(1)
+        s = socket.socket(socket.AF_UNIX)
+
+        tries = 0
+        while tries < 10 and po_obj.poll() is None:
+            time.sleep(.5)
+            try:
+                s.connect(sockpath)
+                break
+            except socket.error:
+                pass
+            tries += 1
+        else:
+            return
 
         try:
-            s = socket.socket(socket.AF_UNIX)
-            s.connect(sockpath)
             cmd = {"command": ["observe_property", 1, "time-pos"]}
             s.send(json.dumps(cmd).encode() + b'\n')
             cmd = {"command": ["observe_property", 2, "volume"]}
             s.send(json.dumps(cmd).encode() + b'\n')
-            volume_level = m = None
+            volume_level = elapsed_s = None
 
             for line in s.makefile():
                 resp = json.loads(line)
 
                 if resp.get('event') == 'property-change' and resp['id'] == 1:
-                    m = int(resp['data'])
+                    elapsed_s = int(resp['data'])
 
                 elif resp.get('event') == 'property-change' and resp['id'] == 2:
                     volume_level = int(resp['data'])
 
-                if m:
-                    line = make_status_line(m, prefix, songlength,
+                if elapsed_s:
+                    line = make_status_line(elapsed_s, prefix, songlength,
                                             volume=volume_level)
 
                     if line != last_displayed_line:
@@ -2092,10 +2135,24 @@ def player_status(po_obj, prefix, songlength=0, mpv=False, sockpath=None):
                 if mv:
                     volume_level = int(mv.group("volume"))
 
-                m = re_player.match(buff)
+                match_object = re_player.match(buff)
 
-                if m:
-                    line = make_status_line(m, prefix, songlength,
+                if match_object:
+
+                    try:
+                        h, m, s = map(int, match_object.groups())
+                        elapsed_s = h * 3600 + m * 60 + s
+
+                    except ValueError:
+
+                        try:
+                            elapsed_s = int(match_object.group('elapsed_s')
+                                            or '0')
+
+                        except ValueError:
+                            continue
+
+                    line = make_status_line(elapsed_s, prefix, songlength,
                                             volume=volume_level)
 
                     if line != last_displayed_line:
@@ -2108,24 +2165,9 @@ def player_status(po_obj, prefix, songlength=0, mpv=False, sockpath=None):
                 buff += char
 
 
-def make_status_line(match_object, prefix, songlength=0, volume=None):
+def make_status_line(elapsed_s, prefix, songlength=0, volume=None):
     """ Format progress line output.  """
     # pylint: disable=R0914
-    if isinstance(match_object, int):
-        elapsed_s = match_object
-
-    else:
-        try:
-            h, m, s = map(int, match_object.groups())
-            elapsed_s = h * 3600 + m * 60 + s
-
-        except ValueError:
-
-            try:
-                elapsed_s = int(match_object.group('elapsed_s') or '0')
-
-            except ValueError:
-                return ""
 
     display_s = elapsed_s
     display_h = display_m = 0
@@ -2151,7 +2193,7 @@ def make_status_line(match_object, prefix, songlength=0, volume=None):
     else:
         vol_suffix = ""
 
-    cw = getxy("width")
+    cw = getxy().width
     prog_bar_size = cw - len(prefix) - len(status_line) - len(vol_suffix) - 7
     progress = int(math.ceil(pct / 100 * prog_bar_size))
     status_line += " [%s]" % ("=" * (progress - 1) +
@@ -2177,7 +2219,7 @@ def _search(url, progtext, qs=None, splash=True, pre_load=True):
 
         # perform fetch
         try:
-            wdata = utf8_decode(g.urlopen(url).read())
+            wdata = utf8_decode(urlopen(url).read())
             wdata = json.loads(wdata)
             songs = get_tracks_from_json(wdata)
 
@@ -2204,7 +2246,7 @@ def _search(url, progtext, qs=None, splash=True, pre_load=True):
 def generate_search_qs(term, page, result_count=None):
     """ Return query string. """
     if not result_count:
-        result_count = getxy("max_results")
+        result_count = getxy().max_results
 
     aliases = dict(relevance="relevance", date="published", rating="rating",
                    views="viewCount")
@@ -2352,7 +2394,7 @@ def pl_search(term, page=1, splash=True, is_user=False):
     url = "https://gdata.youtube.com/feeds/api%s" % x
     prog = "user: " + term if is_user else term
     logging.info("playlist search for %s", prog)
-    max_results = getxy("max_results")
+    max_results = getxy().max_results
     start = (page - 1) * max_results or 1
     qs = {"start-index": start,
           "max-results": max_results, "v": 2, 'alt': 'jsonc'}
@@ -2371,7 +2413,7 @@ def pl_search(term, page=1, splash=True, is_user=False):
         g.message = "Searching playlists for %s" % c.y + prog + c.w
         screen_update()
         try:
-            wpage = utf8_decode(g.urlopen(url).read())
+            wpage = utf8_decode(urlopen(url).read())
             pldata = json.loads(wpage)
             playlists = get_pl_from_json(pldata)
         except HTTPError:
@@ -2492,7 +2534,7 @@ def fetch_comments(item):
     if url not in g.url_memo:
 
         try:
-            raw = utf8_decode(g.urlopen(url).read())
+            raw = utf8_decode(urlopen(url).read())
             add_to_url_memo(url, raw)
 
         except HTTPError:
@@ -2601,14 +2643,38 @@ def _make_fname(song, ext=None, av=None, subdir=None):
     filename = os.path.join(ddir, mswinfn(filename.replace("/", "-")))
     return filename
 
+def extract_metadata(name):
+    """ Try to determine metadata from video title. """
 
-def remux_audio(filename):
-    """ Remux audio file. """
+    seps = name.count(" - ")
+    artist = title = None
+
+    if seps == 1:
+
+        pos = name.find(" - ")
+        artist = name[:pos].strip()
+        title = name[pos + 3:].strip()
+
+    else:
+        title = name.strip()
+
+    return dict(artist=artist, title=title)
+
+
+def remux_audio(filename, title):
+    """ Remux audio file. Insert limited metadata tags """
     dbg("starting remux")
     temp_file = filename + "." + uni(random.randint(10000, 99999))
     os.rename(filename, temp_file)
+    meta  = extract_metadata(title)
+    metadata = ["title=%s" % meta["title"]]
 
-    cmd = [g.muxapp, "-y", "-i", temp_file, "-acodec", "copy", "-vn", filename]
+    if meta["artist"]:
+        metadata = ["title=%s" % meta["title"], "-metadata",
+                    "artist=%s" % meta["artist"]]
+
+    cmd = [g.muxapp, "-y", "-i", temp_file, "-acodec", "copy", "-metadata"]
+    cmd += metadata + ["-vn", filename]
     dbg(cmd)
 
     try:
@@ -2652,7 +2718,6 @@ def transcode(filename, enc_data):
         elif d == "OUT.EXT":
             newcom[n] = outfn = base + "." + enc_data['ext']
 
-    # TODO: execute quietly?
     returncode = subprocess.call(newcom)
 
     if returncode == 0 and g.delete_orig:
@@ -2661,11 +2726,45 @@ def transcode(filename, enc_data):
     return outfn
 
 
+def external_download(filename, url):
+    """ Perform download using external application. """
+    cmd = Config.DOWNLOAD_COMMAND.get
+    ddir, basename = Config.DDIR.get, os.path.basename(filename)
+    cmd_list = shlex.split(cmd)
+
+    def list_string_sub(orig, repl, lst):
+        """ Replace substrings for items in a list. """
+        return [x if orig not in x else x.replace(orig, repl) for x in lst]
+
+    cmd_list = list_string_sub("%F", filename, cmd_list)
+    cmd_list = list_string_sub("%d", ddir, cmd_list)
+    cmd_list = list_string_sub("%f", basename, cmd_list)
+    cmd_list = list_string_sub("%u", url, cmd_list)
+    dbg("Downloading using: %s", " ".join(cmd_list))
+    subprocess.call(cmd_list)
+
+
 def _download(song, filename, url=None, audio=False, allow_transcode=True):
-    """ Download file, show status, return filename. """
+    """ Download file, show status.
+
+    Return filename or None in case of user specified download command.
+
+    """
     # pylint: disable=R0914
     # too many local variables
     # Instance of 'bool' has no 'url' member (some types not inferable)
+
+    if not url:
+        streams = get_streams(song)
+        stream = select_stream(streams, 0, audio=audio, m4a_ok=True)
+        url = stream['url']
+
+    # if an external download command is set, use it
+    if Config.DOWNLOAD_COMMAND.get:
+        title = c.y + os.path.splitext(os.path.basename(filename))[0] + c.w
+        xprint("Downloading %s using custom command" % title)
+        external_download(filename, url)
+        return None
 
     if not Config.OVERWRITE.get:
         if os.path.exists(filename):
@@ -2677,12 +2776,7 @@ def _download(song, filename, url=None, audio=False, allow_transcode=True):
     status_string = ('  {0}{1:,}{2} Bytes [{0}{3:.2%}{2}] received. Rate: '
                      '[{0}{4:4.0f} kbps{2}].  ETA: [{0}{5:.0f} secs{2}]')
 
-    if not url:
-        streams = get_streams(song)
-        stream = select_stream(streams, 0, audio=audio, m4a_ok=True)
-        url = stream['url']
-
-    resp = g.urlopen(url)
+    resp = urlopen(url)
     total = int(resp.info()['Content-Length'].strip())
     chunksize, bytesdone, t0 = 16384, 0, time.time()
     outfh = open(filename, 'wb')
@@ -2704,16 +2798,15 @@ def _download(song, filename, url=None, audio=False, allow_transcode=True):
         sys.stdout.write("\r" + status + ' ' * 4 + "\r")
         sys.stdout.flush()
 
-    # download done
     active_encoder = g.encoders[Config.ENCODER.get]
     ext = filename.split(".")[-1]
     valid_ext = ext in active_encoder['valid'].split(",")
 
+    if audio and g.muxapp:
+        remux_audio(filename, song.title)
+
     if Config.ENCODER.get != 0 and valid_ext and allow_transcode:
         filename = transcode(filename, active_encoder)
-
-    elif audio and g.muxapp:
-        remux_audio(filename)
 
     return filename
 
@@ -3002,7 +3095,7 @@ def play(pre, choice, post=""):
         repeat = "repeat" in pre + post
         novid = "-a" in pre + post
         fs = "-f" in pre + post
-        nofs = "-w" in pre + post
+        nofs = "-w" in pre + post or "-v" in pre + post
 
         if (novid and fs) or (novid and nofs) or (nofs and fs):
             raise IOError("Conflicting override options specified")
@@ -3151,7 +3244,11 @@ def show_help(choice):
                           "show_video playurl dlurl d da dv all *"
                           " play".split()),
 
-             "encode": "encoding transcoding transcode wma mp3 format".split(),
+             "dl-command": ("dlcmd dl-cmd download-cmd dl_cmd download_cmd "
+                            "download-command download_command".split()),
+
+             "encode": ("encoding transcoding transcode wma mp3 format "
+                        "encode encoder".split()),
 
              "invoke": "command commands mpsyt invocation".split(),
 
@@ -3223,7 +3320,7 @@ def quits(showlogo=True):
 
         try:
             url = "https://github.com/np1/mps-youtube/raw/master/VERSION"
-            v = utf8_decode(g.urlopen(url, timeout=1).read())
+            v = utf8_decode(urlopen(url, timeout=1).read())
             v = re.search(r"^version\s*([\d\.]+)\s*$", v, re.MULTILINE)
 
             if v:
@@ -3285,12 +3382,12 @@ def menu_prompt(model, prompt=" > ", rows=None, header=None, theading=None,
     content = ""
 
     for x in header, theading, rows, footer:
-        if type(x) == list:
+        if isinstance(x, list):
 
             for line in x:
                 content += line + "\n"
 
-        elif type(x) == str:
+        elif isinstance(x, str):
             content += x + "\n"
 
     g.content = content
@@ -3324,7 +3421,8 @@ def prompt_dl(song):
     url, ext = menu_prompt(model, "Download number: ", *dl_text)
     url2 = ext2 = None
 
-    if ext == "m4v" and g.muxapp:
+    if ext == "m4v" and g.muxapp and not Config.DOWNLOAD_COMMAND.get:
+        # offer mux if not using external downloader
         dl_data, p = get_dl_data(song, mediatype="audio")
         dl_text = gen_dl_text(dl_data, song, p)
         au_choices = "1" if len(dl_data) == 1 else "1-%s" % len(dl_data)
@@ -3420,11 +3518,17 @@ def download(dltype, num):
             # download user selected stream(s)
             filename = _make_fname(song, ext)
             args = (song, filename, url)
-            kwargs = {}
 
             if url_au and ext_au:
+                # downloading video and audio stream for muxing
+                audio = False
                 filename_au = _make_fname(song, ext_au)
                 args_au = (song, filename_au, url_au)
+
+            else:
+                audio = ext in ("m4a", "ogg")
+
+            kwargs = dict(audio=audio)
 
     elif best:
         # set updownload without prompt
@@ -3439,7 +3543,8 @@ def download(dltype, num):
         # perform download(s)
         dl_filenames = [args[1]]
         f = _download(*args, **kwargs)
-        g.message = "Saved to " + c.g + f + c.w
+        if f:
+            g.message = "Saved to " + c.g + f + c.w
 
         if url_au:
             dl_filenames += [args_au[1]]
@@ -3608,7 +3713,7 @@ def nextprev(np):
     good = False
 
     if np == "n":
-        max_results = getxy("max_results")
+        max_results = getxy().max_results
         if len(content) == max_results and glsq:
             g.current_page += 1
             good = True
@@ -3818,7 +3923,7 @@ def dump(un):
 
 def plist(parturl, pagenum=1, splash=True, dumps=False):
     """ Retrieve YouTube playlist. """
-    max_results = getxy("max_results")
+    max_results = getxy().max_results
 
     if "playlist" in g.last_search_query and\
             parturl == g.last_search_query['playlist']:
@@ -3911,7 +4016,7 @@ def _do_query(url, query, err='query failed', cache=True, report=False):
     url = "%s?%s" % (url, urlencode(query))
 
     try:
-        wdata = utf8_decode(g.urlopen(url).read())
+        wdata = utf8_decode(urlopen(url).read())
 
     except (URLError, HTTPError) as e:
         g.message = "%s: %s (%s)" % (err, e, url)
@@ -4246,7 +4351,7 @@ def main():
 
     # input types
     word = r'[^\W\d][-\w\s]{,100}'
-    rs = r'(?:repeat\s*|shuffle\s*|-a\s*|-f\s*|-w\s*)'
+    rs = r'(?:repeat\s*|shuffle\s*|-a\s*|-v\s*|-f\s*|-w\s*)'
     pl = r'(?:.*=|)([-_a-zA-Z0-9]{18,50})(?:(?:\&\#).*|$)'
     regx = {
         ls: r'ls$',
@@ -4269,10 +4374,11 @@ def main():
         user_pls: r'u(?:ser)?pl\s(.*)$',
         save_last: r'save\s*$',
         pl_search: r'(?:\.\.|\/\/|pls(?:earch)?\s)\s*(.*)$',
-        setconfig: r'set\s+([-\w]+)\s*"?([^"]*)"?\s*$',
+        # setconfig: r'set\s+([-\w]+)\s*"?([^"]*)"?\s*$',
+        setconfig: r'set\s+([-\w]+)\s*(.*?)\s*$',
         clip_copy: r'x\s*(\d+)$',
         down_many: r'(da|dv)\s+((?:\d+\s\d+|-\d|\d+-|\d,)(?:[\d\s,-]*))\s*$',
-        show_help: r'(?:help|h)(?:\s+(-?\w+)\s*)?$',
+        show_help: r'(?:help|h)(?:\s+([-_a-zA-Z]+)\s*)?$',
         show_encs: r'encoders?\s*$',
         user_more: r'u\s?([\d]{1,4})$',
         down_plist: r'(da|dv)pl\s+%s' % pl,
@@ -4428,6 +4534,28 @@ Then, when results are shown:
 {2}shuffle <number(s)>{1} - play specified items in random order.
 """.format(c.ul, c.w, c.y)),
 
+    ("dl-command", "Downloading Using External Application", """
+{0}Download Using A Custom Application{1}
+
+Use {2}set download_command <command>{1} to specify a custom command to use for
+downloading.
+
+mps-youtube will make the following substitutions:
+
+%u - url of the remote file to download
+%d - download directory as set in DDIR in mps-youtube config
+%f - filename (determined by title and filetype)
+%F - full file path (%d/%f)
+
+for example, to download using aria2c (http://aria2.sourceforge.net), enter:
+
+    {2}set download_command aria2c --dir=%d --out=%f %u{1}
+
+Note that using a custom download command does not support transcoding the
+downloaded file to another format using mps-youtube.
+""".format(c.ul, c.w, c.y)),
+
+
     ("encode", "Encoding to MP3 and other formats", """
 {0}Encoding to MP3 and other formats{1}
 
@@ -4440,7 +4568,6 @@ available in the system path.
 The encoding presets can be modified by editing the text config file which
 resides at:
    {3}
-
 """.format(c.ul, c.w, c.y, g.TCFILE)),
 
     ("playlists", "Using Local Playlists", """
@@ -4497,6 +4624,7 @@ If you need to enter an actual comma on the command line, use {2},,{1} instead.
 {2}set columns <columns>{1} - select extra displayed fields in search results:
      (valid: views comments rating date user likes dislikes category)
 {2}set ddir <download direcory>{1} - set where downloads are saved
+{2}set download_command <command>{1} - type {2}help dl-command{1} for info
 {2}set encoder <number>{1} - set encoding preset for downloaded files
 {2}set fullscreen true|false{1} - output video content in full-screen mode
 {2}set max_res <number>{1} - play / download maximum video resolution height{3}
@@ -4547,26 +4675,15 @@ command
 """.format(c.ul, c.w, c.y)),
 
     ("new", "New Features", """
-{0}New Features in v0.2.x{1}
+{0}New Features in v0.2.2{1}
 
- - Transcode audio to MP3 and other formats (requires ffmpeg or avconv)
+ - Display playing resolution / bitrate in status line (Brebiche38)
 
- - Auto detect terminal size
+ - Skip to previously played item (ids1024)
 
- - Added option to show system notifications (Alex Nisnevich) #95
-    (can be used with libnotify - notify-send on linux)
+ - Enable custom keymap using mplayer/mpv input.conf file (ids1024)
 
- - Added overwrite true/false option for downloads (mtahmed) #93
-    (skips download if downloaded file already exists)
-
- - Playback progress indicator now works with mpv (previously only mplayer)
-
- - Added dapl and dvpl to download YoutTube playlist audio/video by url/id
-     to a separate subdirectory (mtahmed) #110
-
- - Enabled da and dv commands for playlist search results
-
- - Remux audio downloads for better compatibility (requires ffmpeg or avconv)
+ - Enable custom downloader application (ids1024 & np1)
 
 """.format(c.ul, c.w, c.y))]
 
